@@ -5,7 +5,19 @@ import {transformFromAst} from "babel-core";
 import {parse} from "@babel/parser";
 import traverse from "@babel/traverse";
 
+import { jsonLoader } from "./loader/JsonLoader.js";
+
 let id = 0; // 文件模块的id，不重复，自增
+const webpackConfig = {
+    module: {
+        rules: [
+            {
+              test: /\.json$/,
+              use: [jsonLoader],
+            }
+        ]
+    }
+};
 
 /**
  * 创建资源
@@ -15,8 +27,29 @@ let id = 0; // 文件模块的id，不重复，自增
  */
 export function createAsset(filePath) {
     // 1、获取文件的内容
-    const source = FS.readFileSync(filePath, {
+    let source = FS.readFileSync(filePath, {
         encoding: "utf-8"
+    });
+
+    // loader就是把非js的文件转换成js
+    // 转换（执行loader） 因为babel只认识javaScript，所以需要在解析ast之前调用loader将原文件转换为js
+    // webpack 也只能理解javascript
+    const loaders = webpackConfig.module.rules;
+    // loader上下文对象，可以添加函数或者添加依赖到loader中去使用
+    const loaderContext = {
+        addDeps() {
+            console.log("add dependencies.");
+        }
+    };
+    loaders.forEach(({test, use}) => {
+        if(test.test(filePath)) {
+            if(Array.isArray(use)) {
+                // loader的执行顺序是从后往前
+                use.reverse().forEach((fn) => {
+                    source = fn.call(loaderContext, source);
+                });
+            }
+        }
     });
     
     // 2、获取依赖关系(使用抽象语法树)
