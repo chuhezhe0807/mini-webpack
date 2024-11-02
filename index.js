@@ -1,10 +1,12 @@
 import FS from "fs";
 import PATH from "path";
 import EJS from "ejs";
+import { SyncHook } from "tapable";
 import {transformFromAst} from "babel-core";
 import {parse} from "@babel/parser";
 import traverse from "@babel/traverse";
 
+import ChangeOutputPath from "./plugin/ChangeOutputPath.js";
 import { jsonLoader } from "./loader/JsonLoader.js";
 
 let id = 0; // 文件模块的id，不重复，自增
@@ -16,8 +18,15 @@ const webpackConfig = {
               use: [jsonLoader],
             }
         ]
-    }
+    },
+    plugins: [
+        new ChangeOutputPath()
+    ]
 };
+
+const hooks = {
+    emitFile: new SyncHook(["context"])
+}
 
 /**
  * 创建资源
@@ -99,9 +108,30 @@ function build(graph) {
     const template = FS.readFileSync("./bundle.ejs", {encoding: "utf-8"});
     const data = graph.map(({code, filePath, mapping, id}) => ({code, filePath, mapping, id}));
     const code = EJS.render(template, {data});
-    
-    FS.writeFileSync("./dist/bundle.js", code);
+
+    let outputPath = "./dist/bundle.js";
+    const context = {
+        changeOutputPath(path) {
+            outputPath = path;
+        }
+    }
+
+    hooks.emitFile.call(context);
+    FS.writeFileSync(outputPath, code);
 }
 
+/**
+ * 初始化plugins，调用每一个plugin的apply方法
+ * webpack 插件本质上就是注册事件，触发事件
+ */
+function initPlugins() {
+    const plugins = webpackConfig.plugins;
+
+    plugins.forEach((plugin) => {
+        plugin.apply(hooks);
+    });
+}
+
+initPlugins();
 const graph = createGraph();
 build(graph);
